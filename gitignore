@@ -1,0 +1,41 @@
+# MedScribe-R-Us AppSec Portfolio Repo — .gitignore
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Editor artifacts
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Secrets — never commit these
+*.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+credentials/
+
+# Build artifacts
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+dist/
+build/
+.next/
+
+# Tool outputs (generated locally, not committed)
+results/
+reports/
+*.sarif
+zap-report.*
+
+# Terraform state (if infra-as-code is added later)
+*.tfstate
+*.tfstate.*
+.terraform/
