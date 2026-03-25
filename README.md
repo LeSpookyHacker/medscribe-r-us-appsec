@@ -95,7 +95,7 @@ security program from zero. It is organized in phases:
 | Phase | Focus | Status |
 |---|---|---|
 | **P0** | Company definition, architecture, regulatory context, data classification | ✅ Complete |
-| **P1** | DFDs, STRIDE threat modeling, AI pipeline threat model | 🔲 Planned |
+| **P1** | DFDs, STRIDE threat modeling, AI pipeline threat model | ✅ Complete |
 | **P2** | CI/CD security pipeline — SAST, SCA, secrets, container, DAST | 🔲 Planned |
 | **P3** | Vulnerability management program, secure architecture reference | 🔲 Planned |
 | **P4** | LLM/AI security deep-dive, bug bounty, program maturity | 🔲 Planned |
