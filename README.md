@@ -130,6 +130,7 @@ medscribe-r-us-appsec/
 ## Author
 
 **Manuel Del Rio** — Security Delivery Manager
+
 This repository is a portfolio project demonstrating the ability to build a zero-to-one
 application security program in a healthcare AI startup context.
 
