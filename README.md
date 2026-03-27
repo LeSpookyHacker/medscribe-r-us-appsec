@@ -129,13 +129,13 @@ medscribe-r-us-appsec/
 
 ## Author
 
-**Manuel Del Rio** — Senior AppSec Engineer  
+**Manuel Del Rio** — Security Delivery Manager
 This repository is a portfolio project demonstrating the ability to build a zero-to-one
 application security program in a healthcare AI startup context.
 
-- Synack Red Team Member
 - Published CVEs in medical device security research
-- ~10 years AppSec experience across MITRE, Accenture, and independent research
+- ~10+ years Pentest/InfoSec/AppSec experience across MITRE, Accenture, and independent research
+- 5+ years DnD Dungeon Master
 
 ---
 
