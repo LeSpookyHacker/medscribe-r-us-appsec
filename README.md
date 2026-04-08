@@ -96,7 +96,11 @@ security program from zero. It is organized in phases:
 |---|---|---|
 | **P0** | Company definition, architecture, regulatory context, data classification | ✅ Complete |
 | **P1** | DFDs, STRIDE threat modeling, AI pipeline threat model | ✅ Complete |
+<<<<<<< HEAD
 | **P2** | CI/CD security pipeline — SAST, SCA, secrets, container, DAST | ✅ Complete |
+=======
+| **P2** | CI/CD security pipeline — SAST, SCA, secrets, container, DAST | 🔲 Planned |
+>>>>>>> 2784f266f5292b757e7208e9bce3bbe35e594a29
 | **P3** | Vulnerability management program, secure architecture reference | 🔲 Planned |
 | **P4** | LLM/AI security deep-dive, bug bounty, program maturity | 🔲 Planned |
 
@@ -129,13 +133,14 @@ medscribe-r-us-appsec/
 
 ## Author
 
-**Manuel Del Rio** — Senior AppSec Engineer  
+**Manuel Del Rio** — Security Delivery Manager
+
 This repository is a portfolio project demonstrating the ability to build a zero-to-one
 application security program in a healthcare AI startup context.
 
-- Synack Red Team Member
 - Published CVEs in medical device security research
-- ~10 years AppSec experience across MITRE, Accenture, and independent research
+- ~10+ years Pentest/InfoSec/AppSec experience across MITRE, Accenture, and independent research
+- 5+ years DnD Dungeon Master
 
 ---
 
