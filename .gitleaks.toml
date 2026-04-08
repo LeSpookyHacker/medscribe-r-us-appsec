@@ -1,0 +1,76 @@
+# .gitleaks.toml — MedScribe-R-Us custom secrets configuration
+# Extends Gitleaks default ruleset with MedScribe-specific patterns.
+# Reference: docs/sdlc/security-gates-policy.md
+
+title = "MedScribe-R-Us Gitleaks Configuration"
+
+[extend]
+# Extend the upstream default ruleset
+useDefault = true
+
+[[rules]]
+id = "gcp-service-account-key"
+description = "GCP Service Account Key file (JSON format)"
+regex = '''\"type\":\s*\"service_account\"'''
+tags = ["gcp", "credentials", "critical"]
+severity = "CRITICAL"
+
+[[rules]]
+id = "mongodb-atlas-connection-string"
+description = "MongoDB Atlas connection string with embedded credentials"
+regex = '''mongodb\+srv://[^:]+:[^@]+@[a-z0-9]+\.mongodb\.net'''
+tags = ["mongodb", "database", "credentials"]
+severity = "CRITICAL"
+
+[[rules]]
+id = "vertex-ai-api-key"
+description = "Google Vertex AI / GCP API key"
+regex = '''AIza[0-9A-Za-z\-_]{35}'''
+tags = ["gcp", "vertex-ai", "credentials"]
+severity = "CRITICAL"
+
+[[rules]]
+id = "smart-on-fhir-client-secret"
+description = "SMART on FHIR OAuth client secret pattern"
+regex = '''(fhir|smart|epic|cerner)[_-]?(client|oauth)?[_-]?secret\s*[=:]\s*["\']?[A-Za-z0-9+/]{32,}'''
+tags = ["oauth", "fhir", "emr", "credentials"]
+severity = "CRITICAL"
+
+[[rules]]
+id = "medscribe-env-secret"
+description = "Hardcoded secret in environment variable assignment"
+regex = '''(SECRET_KEY|JWT_SECRET|API_KEY|SIGNING_KEY|WEBHOOK_SECRET)\s*=\s*["\'][A-Za-z0-9+/]{20,}["\']'''
+tags = ["env", "credentials"]
+severity = "HIGH"
+
+[[rules]]
+id = "phi-test-data-in-code"
+description = "Real-looking PHI patterns hardcoded in source (SSN, MRN formats)"
+regex = '''\b[0-9]{3}-[0-9]{2}-[0-9]{4}\b'''
+tags = ["phi", "hipaa", "pii"]
+severity = "HIGH"
+[rules.allowlist]
+regexes = [
+  # Allow SSN-format strings in test files if they use obviously fake values
+  '''000-00-0000''',
+  '''123-45-6789''',
+]
+
+# ── Path allowlists ────────────────────────────────────────────────────
+# Paths that are always excluded from scanning.
+[allowlist]
+description = "MedScribe global allowlist"
+paths = [
+  '''.gitleaks.toml''',
+  '''docs/''',           # Documentation files (no secrets expected)
+  '''tests/fixtures/''', # Test fixtures use synthetic data only
+  '''\.github/workflows/''', # Workflow files use ${{ secrets.* }} syntax only
+]
+regexes = [
+  # GitHub Actions secret reference syntax — not a real secret
+  '''\$\{\{\s*secrets\.[A-Z_]+\s*\}\}''',
+  # Example/placeholder values in docs
+  '''your[_-]?api[_-]?key[_-]?here''',
+  '''<YOUR_.*>''',
+  '''REPLACE_ME''',
+]

@@ -1,0 +1,93 @@
+rules:
+  # ── Missing Authentication on FastAPI Routes ───────────────────────
+  # Detects FastAPI route handlers that access PHI-related resources
+  # without requiring the authentication dependency.
+  # Addresses the risk of unauthenticated PHI exposure (T-002 related).
+
+  - id: fastapi-route-missing-auth-dependency
+    message: >
+      FastAPI route handler appears to be missing authentication dependency.
+      Routes that handle PHI or sensitive operations must include
+      `Depends(get_current_clinician)`, `Depends(get_current_admin)`, or
+      an equivalent auth dependency in their function signature.
+      Unauthenticated routes are only acceptable for public endpoints
+      (health checks, public FHIR schemas). Suppress with justification.
+    severity: ERROR
+    languages: [python]
+    patterns:
+      - pattern: |
+          @$ROUTER.$METHOD("...")
+          async def $FUNC($PARAMS):
+            ...
+      - metavariable-regex:
+          metavariable: $ROUTER
+          regex: '^(router|app|api_router)$'
+      - metavariable-regex:
+          metavariable: $METHOD
+          regex: '^(get|post|put|patch|delete)$'
+      - pattern-not: |
+          @$ROUTER.$METHOD("...")
+          async def $FUNC(..., $DEP: $TYPE = Depends(...), ...):
+            ...
+      - pattern-not: |
+          @$ROUTER.$METHOD("/health")
+          async def $FUNC($PARAMS):
+            ...
+      - pattern-not: |
+          @$ROUTER.$METHOD("/metrics")
+          async def $FUNC($PARAMS):
+            ...
+    metadata:
+      cwe: CWE-306
+      hipaa: Security Rule §164.312(a)(1)
+      category: security
+
+  - id: fastapi-bypass-auth-with-none-check
+    message: >
+      Optional authentication dependency with None check detected.
+      Pattern `current_user: Optional[User] = Depends(get_optional_user)`
+      followed by `if current_user is None: ...` may allow unauthenticated
+      access to branch logic that handles PHI. All PHI-touching endpoints
+      must use mandatory (non-optional) authentication dependencies.
+    severity: WARNING
+    languages: [python]
+    pattern: |
+      async def $FUNC(..., $USER: Optional[$TYPE] = Depends(...), ...):
+        ...
+        if $USER is None:
+          ...
+    metadata:
+      cwe: CWE-287
+      hipaa: Security Rule §164.312(a)(1)
+      category: security
+
+  # ── Missing Tenant Scope Check ─────────────────────────────────────
+  # Addresses T-011: horizontal privilege escalation between tenants.
+  # Admin routes must validate tenant_id from the JWT, not from the
+  # request payload or path parameter alone.
+
+  - id: admin-route-missing-tenant-scope
+    message: >
+      Admin route handler accesses tenant_id from request parameters without
+      validating against the JWT claim — potential horizontal privilege
+      escalation (T-011). Admin endpoints must extract tenant_id exclusively
+      from the authenticated JWT (`current_user.tenant_id`), never from
+      path parameters or query strings that a user can manipulate.
+    severity: ERROR
+    languages: [python]
+    patterns:
+      - pattern: |
+          @$ROUTER.$METHOD("/admin/...")
+          async def $FUNC(..., tenant_id: $TYPE, ...):
+            ...
+      - pattern-not: |
+          @$ROUTER.$METHOD("/admin/...")
+          async def $FUNC(..., $USER = Depends(...), ...):
+            ...
+            $USER.tenant_id
+            ...
+    metadata:
+      cwe: CWE-639
+      hipaa: Security Rule §164.312(a)(1)
+      stride: T-011
+      category: security

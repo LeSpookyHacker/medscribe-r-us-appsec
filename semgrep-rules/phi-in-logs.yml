@@ -1,0 +1,95 @@
+rules:
+  # ── T-006: PHI in Application Logs ────────────────────────────────
+  # Directly addresses STRIDE finding T-006 (Critical — Information Disclosure).
+  # Detects log calls that pass variables whose names match PHI patterns.
+  # Reference: docs/threat-model/stride-register.md#t-006
+
+  - id: phi-variable-in-logger
+    message: >
+      Potential PHI variable passed to logger — HIPAA violation risk (T-006).
+      PHI must never appear in application logs. Review this log call and
+      either remove the PHI variable or use a sanitized/masked representation.
+      Suppress with `# nosemgrep: phi-variable-in-logger` only after confirming
+      the variable contains no PHI, with a comment explaining the justification.
+    severity: ERROR
+    languages: [python]
+    patterns:
+      - pattern: $LOGGER.$METHOD(..., $VAR, ...)
+      - metavariable-regex:
+          metavariable: $LOGGER
+          regex: '^(logger|log|logging|LOGGER|LOG)$'
+      - metavariable-regex:
+          metavariable: $VAR
+          regex: >-
+            .*(transcript|patient|phi|note|audio|deid|
+            de_id|scrub|soap|clinical|encounter|
+            appointment|recording|pii|hipaa|mrn|
+            ssn|dob|diagnosis|medication|treatment).*
+    metadata:
+      cwe: CWE-532
+      hipaa: Security Rule §164.312(b)
+      stride: T-006
+      category: security
+
+  - id: phi-fstring-in-logger
+    message: >
+      F-string containing PHI-pattern variable passed to logger — HIPAA violation risk (T-006).
+      Structured logging with explicit field names is preferred over f-strings
+      which can inadvertently include PHI values in log output.
+    severity: ERROR
+    languages: [python]
+    pattern: $LOGGER.$METHOD(f"...$VAR...")
+    metavariable-regex:
+      metavariable: $VAR
+      regex: >-
+        .*(transcript|patient|phi|note|audio|deid|
+        soap|clinical|encounter|appointment|recording|
+        pii|mrn|ssn|dob|diagnosis|medication).*
+    metadata:
+      cwe: CWE-532
+      hipaa: Security Rule §164.312(b)
+      stride: T-006
+      category: security
+
+  - id: phi-exception-body-logged
+    message: >
+      Request body logged in exception handler — high PHI exposure risk (T-006).
+      Exception handlers that log the full request body will capture PHI from
+      audio upload endpoints, transcript endpoints, and note editing endpoints.
+      Use structured error logging that captures only the request path and
+      error type, never the body.
+    severity: ERROR
+    languages: [python]
+    patterns:
+      - pattern: |
+          except $EX:
+            ...
+            $LOGGER.$METHOD(..., $REQUEST.body, ...)
+      - pattern: |
+          except $EX:
+            ...
+            $LOGGER.$METHOD(..., await $REQUEST.body(), ...)
+    metadata:
+      cwe: CWE-532
+      hipaa: Security Rule §164.312(b)
+      stride: T-006
+      category: security
+
+  - id: print-phi-variable
+    message: >
+      print() call with PHI-pattern variable — development debug statement left in code (T-006).
+      print() output is captured in Cloud Run logs and aggregated in Datadog.
+      Remove this statement or replace with structured logging that excludes PHI.
+    severity: WARNING
+    languages: [python]
+    pattern: print(..., $VAR, ...)
+    metavariable-regex:
+      metavariable: $VAR
+      regex: >-
+        .*(transcript|patient|phi|note|audio|deid|
+        soap|clinical|encounter|appointment|recording|mrn).*
+    metadata:
+      cwe: CWE-532
+      hipaa: Security Rule §164.312(b)
+      stride: T-006
+      category: security
