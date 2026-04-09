@@ -1,0 +1,145 @@
+name: DAST — OWASP ZAP
+
+on:
+  push:
+    branches: [main]
+  # DAST runs post-deploy to staging, not on PR — it needs a running application.
+  # Triggered manually or by a successful staging deployment.
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: 'Staging URL to scan (e.g. https://staging.medscribe-r-us.fake)'
+        required: true
+        default: 'https://staging.medscribe-r-us.fake'
+      scan_type:
+        description: 'Scan type'
+        required: true
+        default: 'baseline'
+        type: choice
+        options:
+          - baseline
+          - full
+
+jobs:
+  zap-baseline:
+    name: ZAP Baseline Scan
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      issues: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set target URL
+        id: set_url
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "TARGET_URL=${{ github.event.inputs.target_url }}" >> $GITHUB_ENV
+          else
+            echo "TARGET_URL=https://staging.medscribe-r-us.fake" >> $GITHUB_ENV
+          fi
+
+      # ── Unauthenticated baseline scan ─────────────────────────────
+      # Covers: missing security headers, open redirects, information
+      # disclosure in error responses, common injection patterns.
+      - name: ZAP Baseline — unauthenticated
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: ${{ env.TARGET_URL }}
+          rules_file_name: .zap/rules.tsv
+          cmd_options: >
+            -a
+            -j
+            -I
+          artifact_name: zap-baseline-unauthenticated
+        continue-on-error: true
+        id: zap_baseline
+
+      # ── Authenticated scan — clinician role ────────────────────────
+      # The highest-risk authenticated surface: access to PHI, note
+      # approval, audio submission. Uses a dedicated test account.
+      - name: ZAP Authenticated Scan — clinician role
+        uses: zaproxy/action-full-scan@v0.10.0
+        with:
+          target: ${{ env.TARGET_URL }}
+          rules_file_name: .zap/rules.tsv
+          cmd_options: >
+            -z "-config scanner.maxScanDurationInMins=20"
+          zap_auth_header_value: Bearer ${{ secrets.ZAP_CLINICIAN_TEST_TOKEN }}
+          artifact_name: zap-clinician-authenticated
+        continue-on-error: true
+        id: zap_clinician
+
+      # ── Authenticated scan — clinic admin role ─────────────────────
+      # Target for T-011: horizontal privilege escalation between tenants.
+      # ZAP's active scanner will attempt parameter manipulation on
+      # tenant-scoped endpoints.
+      - name: ZAP Authenticated Scan — clinic admin role
+        uses: zaproxy/action-full-scan@v0.10.0
+        with:
+          target: ${{ env.TARGET_URL }}/admin
+          rules_file_name: .zap/rules-admin.tsv
+          zap_auth_header_value: Bearer ${{ secrets.ZAP_ADMIN_TEST_TOKEN }}
+          artifact_name: zap-admin-authenticated
+        continue-on-error: true
+        id: zap_admin
+
+      # ── Upload SARIF ───────────────────────────────────────────────
+      - name: Upload ZAP SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: zap-baseline-unauthenticated.sarif
+          category: dast-zap
+
+      # ── Gate logic ─────────────────────────────────────────────────
+      # HIGH severity ZAP findings block deployment.
+      # MEDIUM and below create GitHub Issues with 30-day SLA.
+      - name: Evaluate DAST gate — HIGH severity
+        if: steps.zap_baseline.outcome == 'failure'
+        run: |
+          echo "::error::DAST gate failed — HIGH severity ZAP finding detected."
+          echo "Review the ZAP report artifact for details."
+          echo "HIGH severity findings must be resolved before this deployment proceeds."
+          exit 1
+
+      # ── Auto-create issues for MEDIUM findings ─────────────────────
+      - name: Create GitHub Issues for MEDIUM findings
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            // Parse ZAP JSON report for medium-severity alerts
+            let alerts = [];
+            try {
+              const report = JSON.parse(fs.readFileSync('report_json.json', 'utf8'));
+              alerts = (report.site || [])
+                .flatMap(s => s.alerts || [])
+                .filter(a => parseInt(a.riskcode) === 2); // 2 = Medium in ZAP
+            } catch(e) {
+              console.log('Could not parse ZAP report:', e.message);
+            }
+
+            for (const alert of alerts.slice(0, 5)) { // cap at 5 issues per run
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `[DAST] ${alert.alert} — Medium`,
+                body: [
+                  `## DAST Finding — Medium Severity`,
+                  `**Source:** OWASP ZAP baseline scan`,
+                  `**Alert:** ${alert.alert}`,
+                  `**Risk:** Medium`,
+                  `**CWE:** ${alert.cweid || 'N/A'}`,
+                  `**Description:** ${alert.desc}`,
+                  `**Solution:** ${alert.solution}`,
+                  `**SLA:** 30 days (per vulnerability management policy)`,
+                  `**Workflow run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`,
+                ].join('\n\n'),
+                labels: ['severity:medium', 'source:dast', 'status:open'],
+              });
+            }

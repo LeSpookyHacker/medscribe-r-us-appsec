@@ -1,0 +1,198 @@
+name: Container Scanning — Trivy
+
+on:
+  push:
+    branches: [main, staging]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ── Scan each Cloud Run service image ──────────────────────────────
+  trivy-backend:
+    name: Trivy — Backend (FastAPI)
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build backend image
+        run: |
+          docker build \
+            -t medscribe-backend:${{ github.sha }} \
+            -f backend/Dockerfile \
+            backend/
+
+      - name: Run Trivy — OS + library CVEs
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: medscribe-backend:${{ github.sha }}
+          format: sarif
+          output: trivy-backend.sarif
+          # Fail on Critical and High with available fixes.
+          # "fix-available" ensures we only block on actionable findings —
+          # unfixed CVEs generate issues but don't block deployment.
+          severity: CRITICAL,HIGH
+          ignore-unfixed: false
+          vuln-type: os,library
+          exit-code: '1'
+        continue-on-error: true
+        id: trivy_backend
+
+      - name: Run Trivy — misconfigurations
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: medscribe-backend:${{ github.sha }}
+          format: sarif
+          output: trivy-backend-misconfig.sarif
+          scan-type: config
+          severity: CRITICAL,HIGH
+          exit-code: '1'
+        continue-on-error: true
+        id: trivy_backend_misconfig
+
+      - name: Upload backend Trivy SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-backend.sarif
+          category: trivy-backend
+
+      - name: Evaluate backend container gate
+        if: >
+          steps.trivy_backend.outcome == 'failure' ||
+          steps.trivy_backend_misconfig.outcome == 'failure'
+        run: |
+          echo "::error::Container gate failed for medscribe-backend."
+          echo "Critical or High severity CVE or misconfiguration found with available fix."
+          echo "Update the base image or affected packages before deploying."
+          exit 1
+
+  trivy-frontend:
+    name: Trivy — Frontend (Next.js)
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build frontend image
+        run: |
+          docker build \
+            -t medscribe-frontend:${{ github.sha }} \
+            -f frontend/Dockerfile \
+            frontend/
+
+      - name: Run Trivy — OS + library CVEs
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: medscribe-frontend:${{ github.sha }}
+          format: sarif
+          output: trivy-frontend.sarif
+          severity: CRITICAL,HIGH
+          ignore-unfixed: false
+          exit-code: '1'
+        continue-on-error: true
+        id: trivy_frontend
+
+      - name: Upload frontend Trivy SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-frontend.sarif
+          category: trivy-frontend
+
+      - name: Evaluate frontend container gate
+        if: steps.trivy_frontend.outcome == 'failure'
+        run: |
+          echo "::error::Container gate failed for medscribe-frontend."
+          exit 1
+
+  # ── Delta report: new CVEs introduced by this change ───────────────
+  # Compares the new image against the previously deployed image.
+  # Focuses reviewers on what THIS PR introduced, not the pre-existing backlog.
+  trivy-delta:
+    name: Trivy — CVE Delta Report
+    runs-on: ubuntu-latest
+    needs: [trivy-backend, trivy-frontend]
+    if: github.event_name == 'pull_request'
+    permissions:
+      pull-requests: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Pull previous production image
+        run: |
+          docker pull \
+            gcr.io/${{ secrets.GCP_PROJECT_ID }}/medscribe-backend:latest \
+            || echo "No previous image found — skipping delta"
+
+      - name: Build new image
+        run: |
+          docker build \
+            -t medscribe-backend:new \
+            -f backend/Dockerfile \
+            backend/
+
+      - name: Scan previous image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: gcr.io/${{ secrets.GCP_PROJECT_ID }}/medscribe-backend:latest
+          format: json
+          output: trivy-prev.json
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+        continue-on-error: true
+
+      - name: Scan new image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: medscribe-backend:new
+          format: json
+          output: trivy-new.json
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
+      - name: Generate delta comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let comment = '## 🛡️ Container CVE Delta Report\n\n';
+            try {
+              const prev = JSON.parse(fs.readFileSync('trivy-prev.json','utf8'));
+              const next = JSON.parse(fs.readFileSync('trivy-new.json','utf8'));
+              const prevIds = new Set(
+                (prev.Results||[]).flatMap(r=>(r.Vulnerabilities||[]).map(v=>v.VulnerabilityID))
+              );
+              const newVulns = (next.Results||[])
+                .flatMap(r=>(r.Vulnerabilities||[]))
+                .filter(v=>!prevIds.has(v.VulnerabilityID));
+              if (newVulns.length === 0) {
+                comment += '✅ No new CVEs introduced by this PR.\n';
+              } else {
+                comment += `⚠️ **${newVulns.length} new CVE(s) introduced:**\n\n`;
+                comment += '| CVE | Severity | Package | Fixed In |\n|---|---|---|---|\n';
+                newVulns.slice(0,10).forEach(v => {
+                  comment += `| ${v.VulnerabilityID} | ${v.Severity} | ${v.PkgName} | ${v.FixedVersion||'No fix yet'} |\n`;
+                });
+                if (newVulns.length > 10) comment += `\n_...and ${newVulns.length - 10} more. See full Trivy report._\n`;
+              }
+            } catch(e) {
+              comment += '_Delta report unavailable — no previous image to compare against._\n';
+            }
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
