@@ -8,7 +8,7 @@
 > **Audience:** Engineering leadership, Executive team
 
 ---
-### Note: This file is populated with both real metrics (such as the threats from P1 being addressed) but also plausible fake metrics, the idea is that this metric dashboard will be viewed by internall app sec engineers once the AppSec program has been rolled out in stages
+### Note: This file is populated with both real metrics (such as the threats from P1 being addressed) but also plausible fake metrics, the idea is that this metric dashboard will be viewed by internal app sec engineers once the AppSec program has been rolled out in stages
 
 ## Program Health Summary
 
