@@ -18,6 +18,9 @@ SAMM defines five Business Functions, each with three Security Practices,
 each scored 0–3 (0 = not performed, 1 = ad hoc, 2 = defined/repeatable,
 3 = optimizing/measuring).
 
+##### Note
+This SAMM assessment is my first time running through the maturity model, so there might be some discrepancies or errors. Some liberties were taken as well as this is a fictional product in a fictional company. 
+
 ---
 
 ## Scoring Summary
