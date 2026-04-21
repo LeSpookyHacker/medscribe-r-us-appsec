@@ -1,0 +1,98 @@
+rules:
+  # ── Insecure LLM Output Handling ───────────────────────────────────
+  # Addresses LLM02 (OWASP LLM Top 10) and T-007/T-008 from the
+  # STRIDE register. LLM output must be treated as UNTRUSTED until
+  # it has cleared all validation gates.
+  # Reference: docs/threat-model/dfd-l2-ai-pipeline.md
+
+  - id: llm-output-used-before-validation
+    message: >
+      LLM API response content accessed directly without schema validation —
+      insecure output handling risk (LLM02). Raw content from the Vertex AI
+      API response must pass through the Output Validation Service before
+      any field is read, stored, or passed to a downstream system.
+      Pattern: always access `validated_note.*` not `raw_response.*` or
+      `llm_output.*` outside the validation pipeline.
+    severity: ERROR
+    languages: [python]
+    patterns:
+      - pattern: $VAR.$FIELD
+      - metavariable-regex:
+          metavariable: $VAR
+          regex: '^(raw_response|llm_output|llm_result|vertex_response|gemini_response)$'
+      - metavariable-regex:
+          metavariable: $FIELD
+          regex: '^(text|content|candidates|parts|assessment|plan|subjective|objective)$'
+    metadata:
+      owasp-llm: LLM02
+      stride: T-007
+      category: security
+
+  - id: llm-response-written-to-db-directly
+    message: >
+      LLM response object written directly to database — insecure output
+      handling (LLM02). LLM output must pass through schema validation,
+      clinical vocab check, PHI re-injection audit, and anomaly detection
+      before being persisted to MongoDB. Never write raw LLM content
+      directly to any data store.
+    severity: ERROR
+    languages: [python]
+    patterns:
+      - pattern: $DB.$COLLECTION.insert_one({..., "content": $LLM.$FIELD, ...})
+      - metavariable-regex:
+          metavariable: $LLM
+          regex: '^(raw_response|llm_output|llm_result|vertex_response)$'
+    metadata:
+      owasp-llm: LLM02
+      stride: T-007
+      category: security
+
+  # ── Unsafe JSON Parsing of LLM Output ─────────────────────────────
+
+  - id: llm-json-parse-without-try-except
+    message: >
+      json.loads() on LLM output without exception handling — LLM responses
+      can return malformed JSON, especially under adversarial prompting.
+      Wrap all LLM output JSON parsing in try/except and handle parse
+      failures by rejecting and flagging the response for security review,
+      never by falling back to a default value that bypasses validation.
+    severity: WARNING
+    languages: [python]
+    patterns:
+      - pattern: json.loads($VAR)
+      - metavariable-regex:
+          metavariable: $VAR
+          regex: '^(raw_response|llm_output|llm_result|vertex_response|llm_text|response_text)$'
+      - pattern-not-inside: |
+          try:
+            ...
+          except ...:
+            ...
+    metadata:
+      owasp-llm: LLM02
+      category: security
+
+  # ── PHI Scrubber Bypass Patterns ───────────────────────────────────
+
+  - id: transcript-sent-to-llm-without-scrubbing
+    message: >
+      Raw transcript variable passed directly to LLM prompt construction —
+      PHI scrubbing bypass risk (T-007, LLM06). Only de-identified
+      transcript content (output of the PHI scrubbing layer) may be
+      included in prompts sent to Vertex AI. Variable names containing
+      'raw' or 'transcript' must not appear in prompt construction functions.
+    severity: ERROR
+    languages: [python]
+    patterns:
+      - pattern: $FUNC(..., $VAR, ...)
+      - metavariable-regex:
+          metavariable: $FUNC
+          regex: '.*(build_prompt|construct_prompt|create_prompt|assemble_prompt).*'
+      - metavariable-regex:
+          metavariable: $VAR
+          regex: '^(raw_transcript|transcript|full_transcript|original_transcript)$'
+    metadata:
+      owasp-llm: LLM06
+      hipaa: Security Rule §164.312(e)(2)(ii)
+      stride: T-007
+      category: security

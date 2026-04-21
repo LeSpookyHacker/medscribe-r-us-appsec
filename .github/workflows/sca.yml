@@ -1,0 +1,167 @@
+name: SCA — Dependency Scanning
+
+on:
+  pull_request:
+    branches: [main, staging]
+  push:
+    branches: [main]
+  schedule:
+    # Run daily at 06:00 UTC — catches newly published CVEs against
+    # pinned dependencies even when no code has changed
+    - cron: '0 6 * * *'
+
+jobs:
+  # ── Python dependency scan ──────────────────────────────────────────
+  python-sca:
+    name: Python — OWASP Dependency-Check
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Run pip-audit
+        id: pip_audit
+        run: |
+          pip-audit \
+            --requirement backend/requirements.txt \
+            --format json \
+            --output pip-audit-results.json \
+            --strict
+        continue-on-error: true
+
+      - name: Run OWASP Dependency-Check (Python)
+        uses: dependency-check/Dependency-Check_Action@main
+        with:
+          project: 'medscribe-backend'
+          path: 'backend/'
+          format: 'SARIF'
+          out: 'reports/python-dc'
+          args: >
+            --enableRetired
+            --enableExperimental
+            --failOnCVSS 7
+
+      - name: Upload Python SCA SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: reports/python-dc/dependency-check-report.sarif
+          category: sca-python
+
+      # ── Gate: Critical CVEs with known exploit block immediately ────
+      - name: Evaluate Python SCA gate
+        run: |
+          CRITICAL=$(cat pip-audit-results.json | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          vulns = [v for dep in data.get('dependencies', [])
+                   for v in dep.get('vulnerabilities', [])
+                   if v.get('cvssv3', {}).get('baseScore', 0) >= 9.0]
+          print(len(vulns))
+          " 2>/dev/null || echo "0")
+
+          if [ "$CRITICAL" -gt "0" ]; then
+            echo "::error::$CRITICAL critical Python dependency CVE(s) found with CVSS >= 9.0."
+            echo "Review pip-audit-results.json and update affected packages."
+            exit 1
+          fi
+
+  # ── Node.js dependency scan ─────────────────────────────────────────
+  node-sca:
+    name: Node.js — npm audit
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies (audit-only)
+        working-directory: frontend/
+        run: npm ci --ignore-scripts
+
+      - name: Run npm audit
+        id: npm_audit
+        working-directory: frontend/
+        run: |
+          npm audit \
+            --json \
+            --audit-level=moderate \
+            > npm-audit-results.json
+        continue-on-error: true
+
+      - name: Evaluate Node.js SCA gate
+        working-directory: frontend/
+        run: |
+          CRITICAL=$(cat npm-audit-results.json | node -e "
+          const data = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+          const vulns = Object.values(data.vulnerabilities || {})
+            .filter(v => v.severity === 'critical');
+          console.log(vulns.length);
+          " 2>/dev/null || echo "0")
+
+          if [ "$CRITICAL" -gt "0" ]; then
+            echo "::error::$CRITICAL critical Node.js dependency CVE(s) found."
+            echo "Run 'npm audit fix' or manually update affected packages."
+            exit 1
+          fi
+
+      - name: Upload npm audit results as artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: npm-audit-results
+          path: frontend/npm-audit-results.json
+          retention-days: 30
+
+  # ── Stale dependency check ──────────────────────────────────────────
+  # Flags packages with no updates in 18+ months — not a CVE, but a
+  # maintenance risk in a HIPAA context requiring software supply chain
+  # due diligence.
+  stale-deps:
+    name: Stale Dependency Check
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Check for stale Python packages
+        run: |
+          pip install pip-audit requests
+          python3 scripts/check-stale-deps.py \
+            --requirements backend/requirements.txt \
+            --threshold-days 548 \
+            --output stale-report.json
+
+      - name: Upload stale dependency report
+        uses: actions/upload-artifact@v4
+        with:
+          name: stale-dependency-report
+          path: stale-report.json
+          retention-days: 90

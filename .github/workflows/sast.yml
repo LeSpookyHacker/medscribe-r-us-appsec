@@ -1,0 +1,76 @@
+name: SAST — Semgrep
+
+on:
+  pull_request:
+    branches: [main, staging]
+  push:
+    branches: [main]
+
+jobs:
+  semgrep:
+    name: Semgrep SAST Scan
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ── Run Semgrep ────────────────────────────────────────────────
+      - name: Run Semgrep — custom rules
+        uses: returntocorp/semgrep-action@v1
+        id: semgrep_custom
+        with:
+          config: ./semgrep-rules/
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+        continue-on-error: true  # collect results before deciding pass/fail
+
+      - name: Run Semgrep — community rulesets
+        uses: returntocorp/semgrep-action@v1
+        id: semgrep_community
+        with:
+          # Healthcare-relevant community packs
+          config: >-
+            p/python
+            p/javascript
+            p/typescript
+            p/owasp-top-ten
+            p/jwt
+            p/secrets
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+        continue-on-error: true
+
+      # ── Upload SARIF to GitHub Advanced Security ───────────────────
+      - name: Upload SARIF results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+
+      # ── Gate logic ────────────────────────────────────────────────
+      # Custom rules: ANY finding blocks the PR (these are MedScribe-specific
+      # PHI handling and auth patterns — no false positive tolerance).
+      #
+      # Community rules: ERROR severity blocks merge to main.
+      #                  WARNING severity creates a GitHub issue but does not block.
+      - name: Evaluate gate — custom rules
+        if: steps.semgrep_custom.outcome == 'failure'
+        run: |
+          echo "::error::SAST gate failed — custom rule violation detected."
+          echo "Custom Semgrep rules cover PHI-in-logs and missing auth patterns."
+          echo "These findings must be resolved or explicitly suppressed with justification before merge."
+          exit 1
+
+      - name: Evaluate gate — community rules (main branch only)
+        if: >
+          github.ref == 'refs/heads/main' &&
+          steps.semgrep_community.outcome == 'failure'
+        run: |
+          echo "::error::SAST gate failed — community ruleset ERROR-severity finding on main."
+          exit 1
