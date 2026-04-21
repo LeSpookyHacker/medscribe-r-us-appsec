@@ -3,7 +3,7 @@
 > ⚠️ **This is a fictional company created for portfolio and educational purposes.**
 > MedScribe-R-Us does not exist. This repository demonstrates how a first AppSec hire
 > would build a security program from scratch at an AI-powered healthcare startup.
-
+> You can read about this project in blog form at: [Wanderer's Grimoire](https://wanderersgrimoire.com/posts/medscribe-r-us-an-appsec-case-study-phase-0)
 ---
 
 ## About MedScribe-R-Us (Fictional)
@@ -139,6 +139,7 @@ A little about me:
 - ~10+ years AppSec experience across MITRE, Accenture, and independent research
 - ~4+ years of DnD 5e Dungeon Master
 
+###### You can read about this project in blog form at: [Wanderer's Grimoire](https://wanderersgrimoire.com/posts/medscribe-r-us-an-appsec-case-study-phase-0)
 ---
 
 *All company names, patient data, clinical notes, and system details in this repository
